@@ -1,0 +1,82 @@
+#!/bin/bash
+
+S1= #Type in the sample name as in the fastq file. Also change the tID name in the RG section of BWA mem
+cd /workdir/$S1
+
+export PATH=/programs/FastQC-0.11.8:$PATH
+export PATH=/programs/kentUtils/bin:$PATH
+export PATH=/programs/freebayes-1.3.5/bin:$PATH
+export PATH=/programs/freebayes-1.3.5/scripts:$PATH
+export PATH=/programs/vcflib-1.0.1/bin:$PATH
+export PATH=/programs/vcflib-1.0.1/scripts:$PATH
+
+echo Started trimmomatic
+
+java -jar /programs/trimmomatic/trimmomatic-0.39.jar PE -phred33 -threads 8 \
+./$S1.R1.fastq.gz ./$S1.R2.fastq.gz \
+paired_F_$S1.fq.gz unpaired_F_$S1.fq.gz paired_R_$S1.fq.gz unpaired_R_$S1.fq.gz \
+ILLUMINACLIP:/programs/trimmomatic/adapters/TruSeq3-PE-2.fa:2:30:10:2:keepBothReads \
+SLIDINGWINDOW:4:15 LEADING:3 TRAILING:3 MINLEN:30
+
+mkdir FastQC
+
+# Start FastQC
+
+echo Started FastQC
+
+fastqc -t 4 ./*gz -o ./FastQC/
+
+echo Finished FastQC
+
+# Indexing the genome and creating sequence directory
+
+bwa index /workdir/genome/3D7_genome.fasta
+
+/programs/gatk4/gatk \
+CreateSequenceDictionary -R /workdir/genome/3D7_genome.fasta
+
+# Generate bam file
+
+bwa mem \
+		-v 1 -t 25 -Y -K 1000000 -R "@RG\tID:$S1\tSM:sample\tPL:Illumina\tLB:TruSeq3-PE-2" \
+		/workdir/genome/3D7_genome.fasta \
+		./paired_F_$S1.fq.gz ./paired_R_$S1.fq.gz \
+		| samtools sort -@ 10 -O bam -o \
+		$S1.bam
+
+echo Finished bam file generation
+
+/programs/sambamba-0.7.1/sambamba markdup $S1.bam $S1.mrkdup.bam
+
+echo Duplicates marked
+
+# Indexing the bam file
+samtools index $S1.mrkdup.bam
+
+#get some metrics from the bam file
+
+#Alignment metrics
+
+samtools flagstat $S1.mrkdup.bam > $S1.alignment_metrics.txt
+
+#Coverage : Produces a histogram (-m option included) or table of coverage per chromosome.
+samtools coverage -m -o $S1.mrkdup.coverage $S1.mrkdup.bam
+
+#Statistics:samtools stats collects statistics from BAM files and outputs in a text format.
+samtools stats $S1.mrkdup.bam > $S1.mrkdup.stats
+
+#Visualizing the output from stats graphically using plot-bamstats.
+plot-bamstats -p ./stat_plots/statplot_$S1 $S1.mrkdup.stats
+
+#Computes the read depth at each position or region
+samtools depth -a $S1.mrkdup.bam > $S1.depth_out.txt
+
+#BAM to bedgraph and bigwig files
+bedtools genomecov -bga -ibam $S1.mrkdup.bam > $S1.cov.bedgraph
+bedGraphToBigWig $S1.cov.bedgraph Pf_chrom.sizes $S1.cov.bw
+
+#Calling variants using Freebayes
+
+freebayes -f /workdir/genome/3D7_genome.fasta -p 1 $S1.mrkdup.bam --gvcf > rawvcf_$S1.vcf
+
+echo variants called and vcf generated
