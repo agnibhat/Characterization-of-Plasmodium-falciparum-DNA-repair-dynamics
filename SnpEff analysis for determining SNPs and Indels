@@ -1,0 +1,59 @@
+#!/bin/bash
+
+S1=     #Type in the sample name here. This is the irradiated sample. Also change the tID name in the RG section of BWA mem
+S2=     #Control. This would be the non irradiated parent vcf file sample name. Eg: Rad51KO
+
+export PATH=/programs/kentUtils/bin:$PATH
+export PATH=/programs/freebayes-1.3.5/bin:$PATH
+export PATH=/programs/freebayes-1.3.5/scripts:$PATH
+export PATH=/programs/vcflib-1.0.1/bin:$PATH
+export PATH=/programs/vcflib-1.0.1/scripts:$PATH
+export PERL5LIB=/programs/vcftools-v0.1.16/share/perl5/5.32:$PERL5LIB
+
+#Filter out SNPs and Indels 
+
+vcftools --vcf ./vcffiles/rawvcf_$S1.vcf --remove-indels --recode --recode-INFO-all --out ./vcffiles/SNPs_$S1
+
+vcftools --vcf ./vcffiles/rawvcf_$S1.vcf --keep-only-indels --recode --recode-INFO-all --out ./vcffiles/Indels_$S1
+
+vcffilter -f "DP > 10 & QUAL > 30" ./vcffiles/SNPs_$S1.recode.vcf > ./vcffiles/SNPs_$S1.final.vcf
+vcffilter -f "DP > 10 & QUAL > 30" ./vcffiles/Indels_$S1.recode.vcf > ./vcffiles/Indels_$S1.final.vcf
+
+bgzip -c ./vcffiles/SNPs_$S1.final.vcf > ./vcffiles/SNPs_$S1.final.vcf.gz
+bgzip -c ./vcffiles/Indels_$S1.final.vcf > ./vcffiles/Indels_$S1.final.vcf.gz
+bgzip -c ./vcffiles/SNPs_$S2.final.vcf > ./vcffiles/SNPs_$S2.final.vcf.gz
+bgzip -c ./vcffiles/Indels_$S2.final.vcf > ./vcffiles/Indels_$S2.final.vcf.gz
+
+tabix ./vcffiles/SNPs_$S1.final.vcf.gz
+tabix ./vcffiles/Indels_$S1.final.vcf.gz
+tabix ./vcffiles/SNPs_$S2.final.vcf.gz
+tabix ./vcffiles/Indels_$S2.final.vcf.gz
+
+vcf-isec -c ./vcffiles/SNPs_$S1.final.vcf.gz ./vcffiles/SNPs_$S2.final.vcf.gz > ./vcffiles/$S1.not.$S2.snps.vcf
+
+vcf-isec -c ./vcffiles/Indels_$S1.final.vcf.gz ./vcffiles/Indels_$S2.final.vcf.gz > ./vcffiles/$S1.not.$S2.indels.vcf
+
+#USe SnpEff 
+mkdir SNP
+mkdir Indel
+
+cp /programs/snpEff-5.1/snpEff.config ./
+
+java -jar /programs/snpEff-5.1/snpEff.jar -c snpEff.config
+
+#Rename the Chromosome names to suit for SnpEff. Copy the chrom_rename_file.txt to the folder
+
+bcftools annotate --rename-chrs chrom_rename_file.txt --threads num_threads -o ./SNP/$S1.not.$S2.new.snps.vcf -Oz ./vcffiles/$S1.not.$S2.snps.vcf
+bcftools annotate --rename-chrs chrom_rename_file.txt --threads num_threads -o ./Indel/$S1.not.$S2.new.indels.vcf -Oz ./vcffiles/$S1.not.$S2.indels.vcf
+
+cd SNP
+cp /programs/snpEff-5.1/snpEff.config ./
+java -jar /programs/snpEff-5.1/snpEff.jar -c snpEff.config
+java -Xmx8g -jar /programs/snpEff-5.1/snpEff.jar -v Plasmodium_falciparum ./SNP/$S1.not.$S2.new.snps.vcf > $S1.not.$S2.snps.ann.vcf
+
+cd ..
+cd Indel
+cp /programs/snpEff-5.1/snpEff.config ./
+java -jar /programs/snpEff-5.1/snpEff.jar -c snpEff.config
+java -Xmx8g -jar /programs/snpEff-5.1/snpEff.jar -v Plasmodium_falciparum ./Indel/$S1.not.$S2.new.indels.vcf > $S1.not.$S2.indels.ann.vcf
+
