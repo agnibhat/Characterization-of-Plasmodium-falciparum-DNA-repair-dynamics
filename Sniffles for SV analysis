@@ -1,0 +1,20 @@
+#!/bin/bash
+
+export PYTHONPATH=/programs/sniffles-2.0.7/lib/python3.9/site-packages
+export PATH=/programs/sniffles-2.0.7/bin:$PATH
+
+S1= #Type the name of the sample as in the file name here.
+
+echo Sniffles started
+date
+
+sniffles -i aln_$S1.sorted.bam --reference 3D7_genome.fasta -v variant_$S1.vcf
+
+echo variant file created!
+date
+
+echo List generation started
+
+#Head: Chromosome, Start, ALT, SVTYPE, Translocation chromosome, End of SV, Length of SV, Reads supporting SV  
+
+bcftools query -H -f '%CHROM, %POS, %ALT, %INFO/SVTYPE, %INFO/CHR2, %INFO/END, %INFO/SVLEN, %INFO/SUPPORT\n' variant_$S1.vcf > SV_$S1.csv
